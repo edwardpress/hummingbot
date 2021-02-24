@@ -40,41 +40,41 @@ from hummingbot.core.utils.async_utils import (
     safe_gather,
 )
 from hummingbot.logger import HummingbotLogger
-from hummingbot.connector.exchange.huobi.huobi_api_order_book_data_source import HuobiAPIOrderBookDataSource
-from hummingbot.connector.exchange.huobi.huobi_api_user_stream_data_source import (
-    HUOBI_SUBSCRIBE_TOPICS,
-    HUOBI_ACCOUNT_UPDATE_TOPIC,
-    HUOBI_ORDER_UPDATE_TOPIC
+from hummingbot.connector.exchange.eunion.eunion_api_order_book_data_source import EunionAPIOrderBookDataSource
+from hummingbot.connector.exchange.eunion.eunion_api_user_stream_data_source import (
+    EUNION_SUBSCRIBE_TOPICS,
+    EUNION_ACCOUNT_UPDATE_TOPIC,
+    EUNION_ORDER_UPDATE_TOPIC
 )
-from hummingbot.connector.exchange.huobi.huobi_auth import HuobiAuth
-from hummingbot.connector.exchange.huobi.huobi_in_flight_order import HuobiInFlightOrder
-from hummingbot.connector.exchange.huobi.huobi_order_book_tracker import HuobiOrderBookTracker
-from hummingbot.connector.exchange.huobi.huobi_utils import (
+from hummingbot.connector.exchange.eunion.eunion_auth import EunionAuth
+from hummingbot.connector.exchange.eunion.eunion_in_flight_order import EunionInFlightOrder
+from hummingbot.connector.exchange.eunion.eunion_order_book_tracker import EunionOrderBookTracker
+from hummingbot.connector.exchange.eunion.eunion_utils import (
     convert_to_exchange_trading_pair,
     convert_from_exchange_trading_pair)
 from hummingbot.connector.trading_rule cimport TradingRule
 from hummingbot.connector.exchange_base import ExchangeBase
-from hummingbot.connector.exchange.huobi.huobi_user_stream_tracker import HuobiUserStreamTracker
+from hummingbot.connector.exchange.eunion.eunion_user_stream_tracker import EunionUserStreamTracker
 from hummingbot.core.utils.tracking_nonce import get_tracking_nonce
 from hummingbot.core.utils.estimate_fee import estimate_fee
 
 hm_logger = None
 s_decimal_0 = Decimal(0)
 s_decimal_NaN = Decimal("NaN")
-HUOBI_ROOT_API = "https://api.huobi.pro/v1"
+EUNION_ROOT_API = "https://api.eunion.pro/v1"
 
 
-class HuobiAPIError(IOError):
+class EunionAPIError(IOError):
     def __init__(self, error_payload: Dict[str, Any]):
         super().__init__(str(error_payload))
         self.error_payload = error_payload
 
 
-cdef class HuobiExchangeTransactionTracker(TransactionTracker):
+cdef class EunionExchangeTransactionTracker(TransactionTracker):
     cdef:
-        HuobiExchange _owner
+        EunionExchange _owner
 
-    def __init__(self, owner: HuobiExchange):
+    def __init__(self, owner: EunionExchange):
         super().__init__()
         self._owner = owner
 
@@ -83,7 +83,7 @@ cdef class HuobiExchangeTransactionTracker(TransactionTracker):
         self._owner.c_did_timeout_tx(tx_id)
 
 
-cdef class HuobiExchange(ExchangeBase):
+cdef class EunionExchange(ExchangeBase):
     MARKET_BUY_ORDER_COMPLETED_EVENT_TAG = MarketEvent.BuyOrderCompleted.value
     MARKET_SELL_ORDER_COMPLETED_EVENT_TAG = MarketEvent.SellOrderCompleted.value
     MARKET_ORDER_CANCELLED_EVENT_TAG = MarketEvent.OrderCancelled.value
@@ -103,8 +103,8 @@ cdef class HuobiExchange(ExchangeBase):
         return hm_logger
 
     def __init__(self,
-                 huobi_api_key: str,
-                 huobi_secret_key: str,
+                 eunion_api_key: str,
+                 eunion_secret_key: str,
                  poll_interval: float = 5.0,
                  trading_pairs: Optional[List[str]] = None,
                  trading_required: bool = True):
@@ -113,11 +113,11 @@ cdef class HuobiExchange(ExchangeBase):
         self._account_id = ""
         self._async_scheduler = AsyncCallScheduler(call_interval=0.5)
         self._ev_loop = asyncio.get_event_loop()
-        self._huobi_auth = HuobiAuth(api_key=huobi_api_key, secret_key=huobi_secret_key)
+        self._eunion_auth = EunionAuth(api_key=eunion_api_key, secret_key=eunion_secret_key)
         self._in_flight_orders = {}
         self._last_poll_timestamp = 0
         self._last_timestamp = 0
-        self._order_book_tracker = HuobiOrderBookTracker(
+        self._order_book_tracker = EunionOrderBookTracker(
             trading_pairs=trading_pairs
         )
         self._poll_notifier = asyncio.Event()
@@ -127,18 +127,17 @@ cdef class HuobiExchange(ExchangeBase):
         self._trading_required = trading_required
         self._trading_rules = {}
         self._trading_rules_polling_task = None
-        self._tx_tracker = HuobiExchangeTransactionTracker(self)
+        self._tx_tracker = EunionExchangeTransactionTracker(self)
 
         self._user_stream_event_listener_task = None
-        self._user_stream_tracker = HuobiUserStreamTracker(huobi_auth=self._huobi_auth,
-                                                           trading_pairs=trading_pairs)
+        self._user_stream_tracker = EunionUserStreamTracker(eunion_auth=self._eunion_auth, trading_pairs=trading_pairs)
 
     @property
     def name(self) -> str:
-        return "huobi"
+        return "eunion"
 
     @property
-    def order_book_tracker(self) -> HuobiOrderBookTracker:
+    def order_book_tracker(self) -> EunionOrderBookTracker:
         return self._order_book_tracker
 
     @property
@@ -150,7 +149,7 @@ cdef class HuobiExchange(ExchangeBase):
         return self._trading_rules
 
     @property
-    def in_flight_orders(self) -> Dict[str, HuobiInFlightOrder]:
+    def in_flight_orders(self) -> Dict[str, EunionInFlightOrder]:
         return self._in_flight_orders
 
     @property
@@ -169,7 +168,7 @@ cdef class HuobiExchange(ExchangeBase):
 
     def restore_tracking_states(self, saved_states: Dict[str, Any]):
         self._in_flight_orders.update({
-            key: HuobiInFlightOrder.from_json(value)
+            key: EunionInFlightOrder.from_json(value)
             for key, value in saved_states.items()
         })
 
@@ -182,7 +181,7 @@ cdef class HuobiExchange(ExchangeBase):
         self._shared_client = client
 
     async def get_active_exchange_markets(self) -> pd.DataFrame:
-        return await HuobiAPIOrderBookDataSource.get_active_exchange_markets()
+        return await EunionAPIOrderBookDataSource.get_active_exchange_markets()
 
     cdef c_start(self, Clock clock, double timestamp):
         self._tx_tracker.c_start(clock, timestamp)
@@ -249,10 +248,10 @@ cdef class HuobiExchange(ExchangeBase):
                            is_auth_required: bool = False) -> Dict[str, Any]:
         content_type = "application/json" if method == "post" else "application/x-www-form-urlencoded"
         headers = {"Content-Type": content_type}
-        url = HUOBI_ROOT_API + path_url
+        url = EUNION_ROOT_API + path_url
         client = await self._http_client()
         if is_auth_required:
-            params = self._huobi_auth.add_auth_to_params(method, path_url, params)
+            params = self._eunion_auth.add_auth_to_params(method, path_url, params)
 
         # aiohttp TestClient requires path instead of url
         if isinstance(client, TestClient):
@@ -285,7 +284,7 @@ cdef class HuobiExchange(ExchangeBase):
             data = parsed_response.get("data")
             if data is None:
                 self.logger().error(f"Error received from {url}. Response is {parsed_response}.")
-                raise HuobiAPIError({"error": parsed_response})
+                raise EunionAPIError({"error": parsed_response})
             return data
 
     async def _update_account_id(self) -> str:
@@ -340,14 +339,14 @@ cdef class HuobiExchange(ExchangeBase):
         # https://www.hbg.com/en-us/about/fee/
         """
 
-        if order_type is OrderType.LIMIT and fee_overrides_config_map["huobi_maker_fee"].value is not None:
-            return TradeFee(percent=fee_overrides_config_map["huobi_maker_fee"].value / Decimal("100"))
-        if order_type is OrderType.MARKET and fee_overrides_config_map["huobi_taker_fee"].value is not None:
-            return TradeFee(percent=fee_overrides_config_map["huobi_taker_fee"].value / Decimal("100"))
+        if order_type is OrderType.LIMIT and fee_overrides_config_map["eunion_maker_fee"].value is not None:
+            return TradeFee(percent=fee_overrides_config_map["eunion_maker_fee"].value / Decimal("100"))
+        if order_type is OrderType.MARKET and fee_overrides_config_map["eunion_taker_fee"].value is not None:
+            return TradeFee(percent=fee_overrides_config_map["eunion_taker_fee"].value / Decimal("100"))
         return TradeFee(percent=Decimal("0.002"))
         """
         is_maker = order_type is OrderType.LIMIT_MAKER
-        return estimate_fee("huobi", is_maker)
+        return estimate_fee("eunion", is_maker)
 
     async def _update_trading_rules(self):
         cdef:
@@ -399,7 +398,7 @@ cdef class HuobiExchange(ExchangeBase):
             "source": "api",
             "state": "filled",
             "canceled-at": 0,
-            "exchange": "huobi",
+            "exchange": "eunion",
             "batch": ""
         }
         """
@@ -418,7 +417,7 @@ cdef class HuobiExchange(ExchangeBase):
                 exchange_order_id = await tracked_order.get_exchange_order_id()
                 try:
                     order_update = await self.get_order_status(exchange_order_id)
-                except HuobiAPIError as e:
+                except EunionAPIError as e:
                     err_code = e.error_payload.get("error").get("err-code")
                     self.c_stop_tracking_order(tracked_order.client_order_id)
                     self.logger().info(f"The limit order {tracked_order.client_order_id} "
@@ -476,7 +475,7 @@ cdef class HuobiExchange(ExchangeBase):
                         ),
                         # Unique exchange trade ID not available in client order status
                         # But can use validate an order using exchange order ID:
-                        # https://huobiapi.github.io/docs/spot/v1/en/#query-order-by-order-id
+                        # https://eunionapi.github.io/docs/spot/v1/en/#query-order-by-order-id
                         exchange_trade_id=exchange_order_id
                     )
                     self.logger().info(f"Filled {execute_amount_diff} out of {tracked_order.amount} of the "
@@ -539,7 +538,7 @@ cdef class HuobiExchange(ExchangeBase):
             except Exception:
                 self.logger().network("Unexpected error while fetching account updates.",
                                       exc_info=True,
-                                      app_warning_msg="Could not fetch account updates from Huobi. "
+                                      app_warning_msg="Could not fetch account updates from eunion. "
                                                       "Check API key and network connection.")
                 await asyncio.sleep(0.5)
 
@@ -553,7 +552,7 @@ cdef class HuobiExchange(ExchangeBase):
             except Exception:
                 self.logger().network("Unexpected error while fetching trading rules.",
                                       exc_info=True,
-                                      app_warning_msg="Could not fetch new trading rules from Huobi. "
+                                      app_warning_msg="Could not fetch new trading rules from eunion. "
                                                       "Check network connection.")
                 await asyncio.sleep(0.5)
 
@@ -571,11 +570,11 @@ cdef class HuobiExchange(ExchangeBase):
         async for stream_message in self._iter_user_stream_queue():
             try:
                 channel = stream_message.get("ch", None)
-                if channel not in HUOBI_SUBSCRIBE_TOPICS:
+                if channel not in EUNION_SUBSCRIBE_TOPICS:
                     continue
 
                 data = stream_message["data"]
-                if channel == HUOBI_ACCOUNT_UPDATE_TOPIC:
+                if channel == EUNION_ACCOUNT_UPDATE_TOPIC:
                     asset_name = data["currency"].upper()
                     balance = data["balance"]
                     available_balance = data["available"]
@@ -584,7 +583,7 @@ cdef class HuobiExchange(ExchangeBase):
                     self._account_available_balances.update({asset_name: Decimal(available_balance)})
                     continue
 
-                elif channel == HUOBI_ORDER_UPDATE_TOPIC:
+                elif channel == EUNION_ORDER_UPDATE_TOPIC:
                     order_id = data["orderId"]
                     client_order_id = data["clientOrderId"]
                     trading_pair = data["symbol"]
@@ -777,11 +776,11 @@ cdef class HuobiExchange(ExchangeBase):
             self.c_stop_tracking_order(order_id)
             order_type_str = order_type.name.lower()
             self.logger().network(
-                f"Error submitting buy {order_type_str} order to Huobi for "
+                f"Error submitting buy {order_type_str} order to eunion for "
                 f"{decimal_amount} {trading_pair} "
                 f"{decimal_price}.",
                 exc_info=True,
-                app_warning_msg=f"Failed to submit buy order to Huobi. Check API key and network connection."
+                app_warning_msg=f"Failed to submit buy order to eunion. Check API key and network connection."
             )
             self.c_trigger_event(self.MARKET_ORDER_FAILURE_EVENT_TAG,
                                  MarketOrderFailureEvent(self._current_timestamp, order_id, order_type))
@@ -848,11 +847,11 @@ cdef class HuobiExchange(ExchangeBase):
             self.c_stop_tracking_order(order_id)
             order_type_str = order_type.name.lower()
             self.logger().network(
-                f"Error submitting sell {order_type_str} order to Huobi for "
+                f"Error submitting sell {order_type_str} order to eunion for "
                 f"{decimal_amount} {trading_pair} "
                 f"{decimal_price}.",
                 exc_info=True,
-                app_warning_msg=f"Failed to submit sell order to Huobi. Check API key and network connection."
+                app_warning_msg=f"Failed to submit sell order to eunion. Check API key and network connection."
             )
             self.c_trigger_event(self.MARKET_ORDER_FAILURE_EVENT_TAG,
                                  MarketOrderFailureEvent(self._current_timestamp, order_id, order_type))
@@ -876,7 +875,7 @@ cdef class HuobiExchange(ExchangeBase):
             path_url = f"/order/orders/{tracked_order.exchange_order_id}/submitcancel"
             response = await self._api_request("post", path_url=path_url, is_auth_required=True)
 
-        except HuobiAPIError as e:
+        except EunionAPIError as e:
             order_state = e.error_payload.get("error").get("order-state")
             if order_state == 7:
                 # order-state is canceled
@@ -890,7 +889,7 @@ cdef class HuobiExchange(ExchangeBase):
                 self.logger().network(
                     f"Failed to cancel order {order_id}: {str(e)}",
                     exc_info=True,
-                    app_warning_msg=f"Failed to cancel the order {order_id} on Huobi. "
+                    app_warning_msg=f"Failed to cancel the order {order_id} on eunion. "
                                     f"Check API key and network connection."
                 )
 
@@ -898,7 +897,7 @@ cdef class HuobiExchange(ExchangeBase):
             self.logger().network(
                 f"Failed to cancel order {order_id}: {str(e)}",
                 exc_info=True,
-                app_warning_msg=f"Failed to cancel the order {order_id} on Huobi. "
+                app_warning_msg=f"Failed to cancel the order {order_id} on eunion. "
                                 f"Check API key and network connection."
             )
 
@@ -934,7 +933,7 @@ cdef class HuobiExchange(ExchangeBase):
             self.logger().network(
                 f"Failed to cancel all orders: {cancel_order_ids}",
                 exc_info=True,
-                app_warning_msg=f"Failed to cancel all orders on Huobi. Check API key and network connection."
+                app_warning_msg=f"Failed to cancel all orders on eunion. Check API key and network connection."
             )
         return cancellation_results
 
@@ -958,7 +957,7 @@ cdef class HuobiExchange(ExchangeBase):
                                 object trade_type,
                                 object price,
                                 object amount):
-        self._in_flight_orders[client_order_id] = HuobiInFlightOrder(
+        self._in_flight_orders[client_order_id] = EunionInFlightOrder(
             client_order_id=client_order_id,
             exchange_order_id=exchange_order_id,
             trading_pair=trading_pair,
