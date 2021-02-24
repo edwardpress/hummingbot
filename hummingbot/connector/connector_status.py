@@ -19,7 +19,8 @@ connector_status = {
     'liquid': 'green',
     'loopring': 'yellow',
     'okex': 'red',
-    'terra': 'yellow'
+    'terra': 'yellow',
+    'eunion': 'green'
 }
 
 warning_messages = {

@@ -34,6 +34,9 @@ dydx_node_address: null
 huobi_api_key: null
 huobi_secret_key: null
 
+eunion_api_key: null
+eunion_secret_key: null
+
 liquid_api_key: null
 liquid_secret_key: null
 

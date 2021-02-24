@@ -61,7 +61,7 @@ from hummingbot.core.utils.estimate_fee import estimate_fee
 hm_logger = None
 s_decimal_0 = Decimal(0)
 s_decimal_NaN = Decimal("NaN")
-EUNION_ROOT_API = "https://api.eunion.pro/v1"
+EUNION_ROOT_API = "https://2020test.eunion.co/"
 
 
 class EunionAPIError(IOError):
