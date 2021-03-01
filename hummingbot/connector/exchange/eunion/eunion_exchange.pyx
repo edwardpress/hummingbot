@@ -110,7 +110,6 @@ cdef class EunionExchange(ExchangeBase):
                  trading_required: bool = True):
 
         super().__init__()
-        self._account_id = ""
         self._async_scheduler = AsyncCallScheduler(call_interval=0.5)
         self._ev_loop = asyncio.get_event_loop()
         self._eunion_auth = EunionAuth(api_key=eunion_api_key, secret_key=eunion_secret_key)
@@ -197,7 +196,6 @@ cdef class EunionExchange(ExchangeBase):
         self._trading_rules_polling_task = safe_ensure_future(self._trading_rules_polling_loop())
         self._user_stream_event_listener_task = safe_ensure_future(self._user_stream_event_listener())
         if self._trading_required:
-            await self._update_account_id()
             self._status_polling_task = safe_ensure_future(self._status_polling_loop())
 
     def _stop_network(self):
@@ -286,15 +284,6 @@ cdef class EunionExchange(ExchangeBase):
                 self.logger().error(f"Error received from {url}. Response is {parsed_response}.")
                 raise EunionAPIError({"error": parsed_response})
             return data
-
-    async def _update_account_id(self) -> str:
-        accounts = await self._api_request("get", path_url="/account/accounts", is_auth_required=True)
-        try:
-            for account in accounts:
-                if account["state"] == "working" and account["type"] == "spot":
-                    self._account_id = str(account["id"])
-        except Exception as e:
-            raise ValueError(f"Unable to retrieve account id: {e}")
 
     async def _update_balances(self):
         cdef:
@@ -685,7 +674,6 @@ cdef class EunionExchange(ExchangeBase):
     @property
     def status_dict(self) -> Dict[str, bool]:
         return {
-            "account_id_initialized": self._account_id != "" if self._trading_required else True,
             "order_books_initialized": self._order_book_tracker.ready,
             "account_balance": len(self._account_balances) > 0 if self._trading_required else True,
             "trading_rule_initialized": len(self._trading_rules) > 0
@@ -710,7 +698,6 @@ cdef class EunionExchange(ExchangeBase):
         order_type_str = "limit" if order_type is OrderType.LIMIT else "limit-maker"
 
         params = {
-            "account-id": self._account_id,
             "amount": f"{amount:f}",
             "client-order-id": order_id,
             "symbol": convert_to_exchange_trading_pair(trading_pair),
