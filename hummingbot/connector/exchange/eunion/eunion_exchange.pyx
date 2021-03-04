@@ -51,7 +51,9 @@ from hummingbot.connector.exchange.eunion.eunion_in_flight_order import EunionIn
 from hummingbot.connector.exchange.eunion.eunion_order_book_tracker import EunionOrderBookTracker
 from hummingbot.connector.exchange.eunion.eunion_utils import (
     convert_to_exchange_trading_pair,
-    convert_from_exchange_trading_pair)
+    convert_from_exchange_trading_pair,
+    get_ms_timestamp
+)
 from hummingbot.connector.trading_rule cimport TradingRule
 from hummingbot.connector.exchange_base import ExchangeBase
 from hummingbot.connector.exchange.eunion.eunion_user_stream_tracker import EunionUserStreamTracker
@@ -249,7 +251,7 @@ cdef class EunionExchange(ExchangeBase):
         url = EUNION_ROOT_API + path_url
         client = await self._http_client()
         if is_auth_required:
-            params = self._eunion_auth.add_auth_to_params(method, path_url, params)
+            params = self._eunion_auth.add_auth_to_params(method, path_url, args=params)
 
         # aiohttp TestClient requires path instead of url
         if isinstance(client, TestClient):
@@ -262,6 +264,9 @@ cdef class EunionExchange(ExchangeBase):
                 timeout=100
             )
         else:
+            if params is not None and method == "get":
+                url = self._eunion_auth.format_get_param_url(url=url, params=params)
+
             response_coro = client.request(
                 method=method.upper(),
                 url=url,
@@ -276,6 +281,7 @@ cdef class EunionExchange(ExchangeBase):
                 raise IOError(f"Error fetching data from {url}. HTTP status is {response.status}.")
             try:
                 parsed_response = await response.json()
+                self.logger().error("PARSED RESPONSE" + ujson.dumps(parsed_response))
             except Exception:
                 raise IOError(f"Error parsing data from {url}.")
 
@@ -293,30 +299,28 @@ cdef class EunionExchange(ExchangeBase):
             dict new_balances = {}
             str asset_name
             object balance
+        local_asset_names = set(self._account_balances.keys())
+        remote_asset_names = set()
 
-        if not self._account_id:
-            await self._update_account_id()
-        data = await self._api_request("get", path_url=f"/account/accounts/{self._account_id}/balance", is_auth_required=True)
-        balances = data.get("list", [])
-        if len(balances) > 0:
-            for balance_entry in balances:
-                asset_name = balance_entry["currency"].upper()
-                balance = Decimal(balance_entry["balance"])
-                if balance == s_decimal_0:
-                    continue
-                if asset_name not in new_available_balances:
-                    new_available_balances[asset_name] = s_decimal_0
-                if asset_name not in new_balances:
-                    new_balances[asset_name] = s_decimal_0
+        params = {
+            "pageNum": "0",
+            "pageSize": "10",
+            "states": "0",
+            "timestamp": get_ms_timestamp(),
+        }
 
-                new_balances[asset_name] += balance
-                if balance_entry["type"] == "trade":
-                    new_available_balances[asset_name] = balance
+        account_info = await self._api_request("get", path_url=f"v2/members/user-balances", is_auth_required=True, params = params)
 
-            self._account_available_balances.clear()
-            self._account_available_balances = new_available_balances
-            self._account_balances.clear()
-            self._account_balances = new_balances
+        for account in account_info:
+            asset_name = account["symbol"]
+            self._account_available_balances[asset_name] = Decimal(str(account["amounts"] - account["frozen"]))
+            self._account_balances[asset_name] = Decimal(str(account["amounts"]))
+            remote_asset_names.add(asset_name)
+
+        asset_names_to_remove = local_asset_names.difference(remote_asset_names)
+        for asset_name in asset_names_to_remove:
+            del self._account_available_balances[asset_name]
+            del self._account_balances[asset_name]
 
     cdef object c_get_fee(self,
                           str base_currency,

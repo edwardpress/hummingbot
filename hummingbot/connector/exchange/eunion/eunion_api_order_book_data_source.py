@@ -24,7 +24,7 @@ from hummingbot.logger import HummingbotLogger
 from hummingbot.connector.exchange.eunion.eunion_order_book import EunionOrderBook
 from hummingbot.connector.exchange.eunion.eunion_utils import convert_to_exchange_trading_pair
 
-EUNION_SYMBOLS_URL = "https://api.eunion.pro/v1/common/symbols"
+EUNION_SYMBOLS_URL = "https://2020test.eunex.co/api/center/open/trade-pairs"
 EUNION_TICKER_URL = "https://api.eunion.pro/market/tickers"
 EUNION_DEPTH_URL = "https://api.eunion.pro/market/depth"
 EUNION_WS_URI = "wss://api.eunion.pro/ws"
@@ -59,30 +59,24 @@ class EunionAPIOrderBookDataSource(OrderBookTrackerDataSource):
 
     @staticmethod
     async def fetch_trading_pairs() -> List[str]:
-        try:
-            from hummingbot.connector.exchange.eunion.eunion_utils import convert_from_exchange_trading_pair
 
-            async with aiohttp.ClientSession() as client:
-                async with client.get(EUNION_SYMBOLS_URL, timeout=10) as response:
-                    if response.status == 200:
-                        all_trading_pairs: Dict[str, Any] = await response.json()
-                        valid_trading_pairs: list = []
-                        for item in all_trading_pairs["data"]:
-                            if item["state"] == "online":
-                                valid_trading_pairs.append(item["symbol"])
-                        trading_pair_list: List[str] = []
-                        for raw_trading_pair in valid_trading_pairs:
-                            converted_trading_pair: Optional[str] = \
-                                convert_from_exchange_trading_pair(raw_trading_pair)
-                            if converted_trading_pair is not None:
-                                trading_pair_list.append(converted_trading_pair)
-                        return trading_pair_list
+        async with aiohttp.ClientSession() as client:
+            async with client.get(EUNION_SYMBOLS_URL) as response:
+                if response.status == 200:
+                    try:
+                        trade_pairs: List[str] = []
+                        data: Dict[str, Any] = await response.json()
+                        for res in data:
+                            trade_pairs.append(
+                                res["tradeCoin"]["symbol"] + "-" + res["priceCoin"]["symbol"]
+                            )
 
-        except Exception:
-            # Do nothing if the request fails -- there will be no autocomplete
-            pass
-
-        return []
+                        return trade_pairs
+                    except Exception:
+                        pass
+                        # raise ValueError("DATA" + json.dumps(data))
+                        # Do nothing if the request fails -- there will be no autocomplete for kucoin trading pairs
+                return []
 
     @staticmethod
     async def get_snapshot(client: aiohttp.ClientSession, trading_pair: str) -> Dict[str, Any]:

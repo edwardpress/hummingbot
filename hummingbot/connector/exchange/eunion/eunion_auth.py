@@ -1,4 +1,6 @@
 import base64
+import logging
+import urllib
 from datetime import datetime
 import hashlib
 import hmac
@@ -9,7 +11,10 @@ from typing import (
 from urllib.parse import urlencode
 from collections import OrderedDict
 
+from hummingbot.logger import HummingbotLogger
+
 EUNION_HOST_NAME = "api.eunion.pro"
+hm_logger = None
 
 
 class EunionAuth:
@@ -17,6 +22,13 @@ class EunionAuth:
         self.api_key: str = api_key
         self.hostname: str = EUNION_HOST_NAME
         self.secret_key: str = secret_key
+
+    @classmethod
+    def logger(cls) -> HummingbotLogger:
+        global hm_logger
+        if hm_logger is None:
+            hm_logger = logging.getLogger(__name__)
+        return hm_logger
 
     @staticmethod
     def keysort(dictionary: Dict[str, str]) -> Dict[str, str]:
@@ -28,6 +40,8 @@ class EunionAuth:
                            args: Dict[str, Any] = None,
                            is_ws: bool = False) -> Dict[str, Any]:
         timestamp: str = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S")
+        param_str: str = urllib.parse.urlencode(args)
+        check_sum_str = "api_id=" + self.api_key + "&" + param_str + "&secret_key=" + self.secret_key
         if is_ws:
             params = {
                 "accessKey": self.api_key,
@@ -37,25 +51,20 @@ class EunionAuth:
             }
         else:
             params = {
-                "AccessKeyId": self.api_key,
-                "SignatureMethod": "HmacSHA256",
-                "SignatureVersion": "2",
-                "Timestamp": timestamp
+                "api_id": self.api_key,
+                "sign": hashlib.sha1(check_sum_str.encode('utf-8')).hexdigest()
             }
         if args is not None:
             params.update(args)
 
-        sorted_params = self.keysort(params)
-        signature = self.generate_signature(method=method,
-                                            path_url=path_url,
-                                            params=sorted_params,
-                                            is_ws=is_ws)
+        return params
 
-        if is_ws:
-            sorted_params["signature"] = signature
-        else:
-            sorted_params["Signature"] = signature
-        return sorted_params
+    def format_get_param_url(self, url: str, params: Dict[str, any]) -> str:
+
+        param_str = urllib.parse.urlencode(params)
+        self.logger().error("LOG" + param_str)
+
+        return f"{url}?{param_str}"
 
     def generate_signature(self,
                            method: str,

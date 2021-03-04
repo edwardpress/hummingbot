@@ -4,7 +4,7 @@ from typing import (
     Tuple)
 from hummingbot.client.config.config_var import ConfigVar
 from hummingbot.client.config.config_methods import using_exchange
-
+from hummingbot.core.utils.tracking_nonce import get_tracking_nonce_low_res
 
 RE_4_LETTERS_QUOTE = re.compile(r"^(\w+)(usdt|husd)$")
 RE_3_LETTERS_QUOTE = re.compile(r"^(\w+)(btc|eth|trx)$")
@@ -39,8 +39,12 @@ def convert_from_exchange_trading_pair(exchange_trading_pair: str) -> Optional[s
 
 
 def convert_to_exchange_trading_pair(hb_trading_pair: str) -> str:
-
     return hb_trading_pair.replace("-", "").lower()
+
+
+# get timestamp in milliseconds
+def get_ms_timestamp() -> int:
+    return get_tracking_nonce_low_res()
 
 
 KEYS = {
